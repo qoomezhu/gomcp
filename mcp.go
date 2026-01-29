@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"net/url"
 	"strings"
@@ -50,7 +51,13 @@ func (c *MCPConn) connect() error {
 		c.cdpcancel()
 	}
 
-	ctx, cancel := chromedp.NewContext(c.srv.cdpctx)
+	// build context options
+	var opts []chromedp.ContextOption
+	if c.srv.Debug {
+		opts = append(opts, chromedp.WithDebugf(log.Printf))
+	}
+
+	ctx, cancel := chromedp.NewContext(c.srv.cdpctx, opts...)
 
 	// ensure the first tab is created
 	if err := chromedp.Run(ctx); err != nil {
@@ -66,7 +73,6 @@ func (c *MCPConn) connect() error {
 
 // Navigate to a specified URL
 func (c *MCPConn) Goto(url string) (string, error) {
-
 	if err := c.connect(); err != nil {
 		return "", fmt.Errorf("browser connect: %w", err)
 	}
@@ -125,14 +131,16 @@ func (c *MCPConn) GetLinks() ([]string, error) {
 type MCPServer struct {
 	Name    string
 	Version string
+	Debug   bool
 
 	cdpctx context.Context
 }
 
-func NewMCPServer(name, version string, cdpctx context.Context) *MCPServer {
+func NewMCPServer(name, version string, cdpctx context.Context, debug bool) *MCPServer {
 	return &MCPServer{
 		Name:    name,
 		Version: version,
+		Debug:   debug,
 		cdpctx:  cdpctx,
 	}
 }
