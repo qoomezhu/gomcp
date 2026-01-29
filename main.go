@@ -143,7 +143,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	)
 	defer cancel()
 
-	mcpsrv := NewMCPServer("lightpanda go mcp", "1.0.0", cdpctx)
+	mcpsrv := NewMCPServer("lightpanda go mcp", "1.0.0", cdpctx, *verbose)
 
 	switch args[0] {
 	case "stdio":
