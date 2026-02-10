@@ -29,14 +29,19 @@ import (
 // Cancelling ctx will shutdown the http server gracefully.
 func runapi(ctx context.Context, addr string, mcpsrv *MCPServer) error {
 	sessions := NewSessions()
+	streamable := NewStreamableSessions(mcpsrv)
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /ack", func(_ http.ResponseWriter, _ *http.Request) {})
 
+	// Legacy SSE transport (backward compatible)
 	mux.HandleFunc("GET /sse", cors(handleSSE(ctx, sessions, mcpsrv)))
 	mux.HandleFunc("POST /messages", cors(handleMessage(ctx, sessions, mcpsrv)))
 	mux.HandleFunc("OPTIONS /messages", cors(handleMessage(ctx, sessions, mcpsrv)))
+
+	// Streamable HTTP transport (MCP 2025-03-26+)
+	mux.HandleFunc("/mcp", cors(handleMCP(ctx, streamable, mcpsrv)))
 
 	srv := &http.Server{
 		Addr:    addr,
@@ -74,13 +79,14 @@ func cors(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("access-control-allow-credentials", "true")
 		w.Header().Set("access-control-allow-origin", "*")
+		w.Header().Set("access-control-expose-headers", "Mcp-Session-Id")
 
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 
 		if req.Method == http.MethodOptions {
-			w.Header().Set("access-control-allow-methods", "GET,POST")
-			w.Header().Set("access-control-allow-headers", "content-type,Accept,Authorization")
+			w.Header().Set("access-control-allow-methods", "GET,POST,DELETE")
+			w.Header().Set("access-control-allow-headers", "content-type,Accept,Authorization,Mcp-Session-Id")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}

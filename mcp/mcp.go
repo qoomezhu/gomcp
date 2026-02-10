@@ -23,7 +23,7 @@ import (
 
 // https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2025-03-26/schema.ts
 
-const Version = "2024-11-05"
+const Version = "2025-03-26"
 
 type Request any
 
