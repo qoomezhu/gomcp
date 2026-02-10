@@ -15,4 +15,5 @@ COPY --from=builder /gomcp /usr/local/bin/
 
 EXPOSE 8081
 
-CMD ["gomcp", "-api-addr", "0.0.0.0:8081", "sse"]
+# Use shell form so $MCP_CDP env var is properly expanded at runtime
+CMD ["sh", "-c", "exec gomcp -api-addr 0.0.0.0:8081 -cdp \"$MCP_CDP\" sse"]
