@@ -15,8 +15,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -109,20 +111,39 @@ func acceptSSE(req *http.Request) bool {
 	return false
 }
 
-// acceptJSON checks if the client accepts JSON response.
-func acceptJSON(req *http.Request) bool {
-	accept := req.Header.Get("Accept")
-	if accept == "" {
-		// Default to JSON if no Accept header
+// isNotificationOnly checks if the JSON-RPC message is a notification or response only
+// (i.e., no "id" field, or only contains "result"/"error" fields).
+// Returns true if the server should respond with 202 Accepted.
+func isNotificationOnly(bodyBytes []byte) bool {
+	// Try to decode as array first (batch)
+	var batch []json.RawMessage
+	if err := json.Unmarshal(bodyBytes, &batch); err == nil {
+		// It's a batch - check each item
+		for _, item := range batch {
+			if !isNotificationOrResponse(item) {
+				return false
+			}
+		}
 		return true
 	}
-	for _, v := range strings.Split(accept, ",") {
-		v = strings.TrimSpace(v)
-		if strings.HasPrefix(v, "application/json") {
-			return true
-		}
+
+	// Single message
+	return isNotificationOrResponse(bodyBytes)
+}
+
+// isNotificationOrResponse checks if a single JSON-RPC message is a notification or response.
+func isNotificationOrResponse(raw json.RawMessage) bool {
+	var msg struct {
+		Id     any `json:"id"`
+		Result any `json:"result"`
+		Error  any `json:"error"`
 	}
-	return false
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return false
+	}
+	// If it has an id, it's a request (not notification-only)
+	// If it has result or error (and no id), it's a response
+	return msg.Id == nil || msg.Result != nil || msg.Error != nil
 }
 
 // handleMCPPost processes incoming JSON-RPC requests over Streamable HTTP.
@@ -131,13 +152,21 @@ func acceptJSON(req *http.Request) bool {
 // - For requests: server returns SSE stream or JSON response
 // - For notifications/responses only: server returns 202 Accepted
 func handleMCPPost(ctx context.Context, w http.ResponseWriter, req *http.Request, ss *StreamableSessions, mcpsrv *MCPServer) {
+	// Read and buffer the body for potential re-reading
+	bodyBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		slog.Error("streamable read body", slog.Any("err", err))
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+	defer req.Body.Close()
+
 	// Decode the JSON-RPC request from the body.
-	mcpreq, err := mcpsrv.Decode(req.Body)
+	mcpreq, err := mcpsrv.Decode(bytes.NewReader(bodyBytes))
 	if err != nil {
 		slog.Error("streamable decode", slog.Any("err", err))
-		// Check if this is an error from a response object (has error field)
-		if isJSONRPCResponse(req.Body) {
-			// This is a response or notification only - return 202 Accepted
+		// Check if this is a notification/response only - return 202 Accepted
+		if isNotificationOnly(bodyBytes) {
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
@@ -262,15 +291,6 @@ func handleMCPPost(ctx context.Context, w http.ResponseWriter, req *http.Request
 	default:
 		http.Error(w, "unsupported method", http.StatusBadRequest)
 	}
-}
-
-// isJSONRPCResponse checks if the request body contains a JSON-RPC response or notification
-// (no method field, or is a notification without id).
-// This is a simplified check - notifications/responses should return 202 Accepted.
-func isJSONRPCResponse(body interface{}) bool {
-	// We can't re-read the body here since it was already consumed
-	// This is a placeholder - in production, we'd need to peek at the body first
-	return false
 }
 
 // handleMCPGet keeps an SSE connection open for server-initiated notifications.
