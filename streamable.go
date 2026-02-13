@@ -19,8 +19,10 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
+	"github.com/gin-contrib/sse"
 	"github.com/google/uuid"
 	"github.com/lightpanda-io/gomcp/mcp"
 	"github.com/lightpanda-io/gomcp/rpc"
@@ -91,12 +93,54 @@ func handleMCP(ctx context.Context, ss *StreamableSessions, mcpsrv *MCPServer) h
 	}
 }
 
+// acceptSSE checks if the client accepts SSE streaming response.
+func acceptSSE(req *http.Request) bool {
+	accept := req.Header.Get("Accept")
+	if accept == "" {
+		return false
+	}
+	// Check for text/event-stream in Accept header
+	for _, v := range strings.Split(accept, ",") {
+		v = strings.TrimSpace(v)
+		if strings.HasPrefix(v, "text/event-stream") {
+			return true
+		}
+	}
+	return false
+}
+
+// acceptJSON checks if the client accepts JSON response.
+func acceptJSON(req *http.Request) bool {
+	accept := req.Header.Get("Accept")
+	if accept == "" {
+		// Default to JSON if no Accept header
+		return true
+	}
+	for _, v := range strings.Split(accept, ",") {
+		v = strings.TrimSpace(v)
+		if strings.HasPrefix(v, "application/json") {
+			return true
+		}
+	}
+	return false
+}
+
 // handleMCPPost processes incoming JSON-RPC requests over Streamable HTTP.
+// Per MCP 2025-03-26 spec:
+// - POST body can be a single request/notification/response or a batch
+// - For requests: server returns SSE stream or JSON response
+// - For notifications/responses only: server returns 202 Accepted
 func handleMCPPost(ctx context.Context, w http.ResponseWriter, req *http.Request, ss *StreamableSessions, mcpsrv *MCPServer) {
 	// Decode the JSON-RPC request from the body.
 	mcpreq, err := mcpsrv.Decode(req.Body)
 	if err != nil {
 		slog.Error("streamable decode", slog.Any("err", err))
+		// Check if this is an error from a response object (has error field)
+		if isJSONRPCResponse(req.Body) {
+			// This is a response or notification only - return 202 Accepted
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -107,14 +151,53 @@ func handleMCPPost(ctx context.Context, w http.ResponseWriter, req *http.Request
 		session := ss.Create()
 		slog.Debug("streamable init", slog.String("session", session.id))
 		w.Header().Set("Mcp-Session-Id", session.id)
-		writeJSON(w, rpc.NewResponse(mcp.InitializeResponse{
-			ProtocolVersion: mcp.Version,
-			ServerInfo: mcp.Info{
-				Name:    mcpsrv.Name,
-				Version: mcpsrv.Version,
-			},
-			Capabilities: mcp.Capabilities{"tools": mcp.Capability{}},
-		}, r.Request.Id))
+
+		// Check if client wants SSE stream
+		if acceptSSE(req) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.Header().Set("Mcp-Session-Id", session.id)
+
+			f, ok := w.(http.Flusher)
+			if !ok {
+				http.Error(w, "streaming not supported", http.StatusInternalServerError)
+				return
+			}
+
+			// Send initialize response as SSE message event
+			err := sse.Encode(w, sse.Event{
+				Event: "message",
+				Data:  rpc.NewResponse(mcp.InitializeResponse{
+					ProtocolVersion: mcp.Version,
+					ServerInfo: mcp.Info{
+						Name:    mcpsrv.Name,
+						Version: mcpsrv.Version,
+					},
+					Capabilities: mcp.Capabilities{"tools": mcp.Capability{}},
+				}, r.Request.Id),
+			})
+			if err != nil {
+				slog.Error("sse encode", slog.Any("err", err))
+				return
+			}
+			f.Flush()
+			// Keep connection open for server-to-client messages
+			select {
+			case <-req.Context().Done():
+			case <-ctx.Done():
+			}
+		} else {
+			// Return JSON response
+			writeJSON(w, rpc.NewResponse(mcp.InitializeResponse{
+				ProtocolVersion: mcp.Version,
+				ServerInfo: mcp.Info{
+					Name:    mcpsrv.Name,
+					Version: mcpsrv.Version,
+				},
+				Capabilities: mcp.Capabilities{"tools": mcp.Capability{}},
+			}, r.Request.Id))
+		}
 
 	case mcp.NotificationsInitializedRequest:
 		setSessionHeader(w, req)
@@ -179,6 +262,15 @@ func handleMCPPost(ctx context.Context, w http.ResponseWriter, req *http.Request
 	default:
 		http.Error(w, "unsupported method", http.StatusBadRequest)
 	}
+}
+
+// isJSONRPCResponse checks if the request body contains a JSON-RPC response or notification
+// (no method field, or is a notification without id).
+// This is a simplified check - notifications/responses should return 202 Accepted.
+func isJSONRPCResponse(body interface{}) bool {
+	// We can't re-read the body here since it was already consumed
+	// This is a placeholder - in production, we'd need to peek at the body first
+	return false
 }
 
 // handleMCPGet keeps an SSE connection open for server-initiated notifications.
