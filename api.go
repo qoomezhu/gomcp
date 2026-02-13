@@ -86,7 +86,7 @@ func cors(next http.HandlerFunc) http.HandlerFunc {
 
 		if req.Method == http.MethodOptions {
 			w.Header().Set("access-control-allow-methods", "GET,POST,DELETE")
-			w.Header().Set("access-control-allow-headers", "content-type,Accept,Authorization,Mcp-Session-Id")
+			w.Header().Set("access-control-allow-headers", "content-type,Accept,Authorization,Mcp-Session-Id,MCP-Protocol-Version")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
