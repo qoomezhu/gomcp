@@ -21,10 +21,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 
-	"github.com/gin-contrib/sse"
 	"github.com/google/uuid"
 	"github.com/lightpanda-io/gomcp/mcp"
 	"github.com/lightpanda-io/gomcp/rpc"
@@ -79,7 +77,6 @@ func (ss *StreamableSessions) Remove(id string) {
 }
 
 // handleMCP is the main handler for the /mcp Streamable HTTP endpoint.
-// It routes requests by HTTP method to the appropriate sub-handler.
 func handleMCP(ctx context.Context, ss *StreamableSessions, mcpsrv *MCPServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		switch req.Method {
@@ -90,86 +87,75 @@ func handleMCP(ctx context.Context, ss *StreamableSessions, mcpsrv *MCPServer) h
 		case http.MethodDelete:
 			handleMCPDelete(w, req, ss)
 		default:
-			// OPTIONS is handled by cors wrapper
+			// OPTIONS handled by cors wrapper
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	}
 }
 
-// acceptSSE checks if the client accepts SSE streaming response.
-func acceptSSE(req *http.Request) bool {
-	accept := req.Header.Get("Accept")
-	if accept == "" {
+// isNotificationOrResponseOnly checks whether a JSON-RPC payload contains no request objects.
+// If payload has any item with "method" and "id", treat as request-containing.
+func isNotificationOrResponseOnly(body []byte) bool {
+	var raw any
+	if err := json.Unmarshal(body, &raw); err != nil {
 		return false
 	}
-	// Check for text/event-stream in Accept header
-	for _, v := range strings.Split(accept, ",") {
-		v = strings.TrimSpace(v)
-		if strings.HasPrefix(v, "text/event-stream") {
-			return true
-		}
-	}
-	return false
-}
 
-// isNotificationOnly checks if the JSON-RPC message is a notification or response only
-// (i.e., no "id" field, or only contains "result"/"error" fields).
-// Returns true if the server should respond with 202 Accepted.
-func isNotificationOnly(bodyBytes []byte) bool {
-	// Try to decode as array first (batch)
-	var batch []json.RawMessage
-	if err := json.Unmarshal(bodyBytes, &batch); err == nil {
-		// It's a batch - check each item
-		for _, item := range batch {
-			if !isNotificationOrResponse(item) {
+	checkObj := func(m map[string]any) (hasRequest bool) {
+		method, hasMethod := m["method"]
+		_, hasID := m["id"]
+
+		// JSON-RPC request: has method + has id
+		if hasMethod {
+			_, _ = method.(string)
+			if hasID {
+				return true
+			}
+		}
+		return false
+	}
+
+	switch v := raw.(type) {
+	case map[string]any:
+		// single message
+		return !checkObj(v)
+	case []any:
+		// batch: if any request exists => not notification/response-only
+		for _, it := range v {
+			m, ok := it.(map[string]any)
+			if !ok {
+				return false
+			}
+			if checkObj(m) {
 				return false
 			}
 		}
 		return true
-	}
-
-	// Single message
-	return isNotificationOrResponse(bodyBytes)
-}
-
-// isNotificationOrResponse checks if a single JSON-RPC message is a notification or response.
-func isNotificationOrResponse(raw json.RawMessage) bool {
-	var msg struct {
-		Id     any `json:"id"`
-		Result any `json:"result"`
-		Error  any `json:"error"`
-	}
-	if err := json.Unmarshal(raw, &msg); err != nil {
+	default:
 		return false
 	}
-	// If it has an id, it's a request (not notification-only)
-	// If it has result or error (and no id), it's a response
-	return msg.Id == nil || msg.Result != nil || msg.Error != nil
 }
 
 // handleMCPPost processes incoming JSON-RPC requests over Streamable HTTP.
-// Per MCP 2025-03-26 spec:
-// - POST body can be a single request/notification/response or a batch
-// - For requests: server returns SSE stream or JSON response
-// - For notifications/responses only: server returns 202 Accepted
 func handleMCPPost(ctx context.Context, w http.ResponseWriter, req *http.Request, ss *StreamableSessions, mcpsrv *MCPServer) {
-	// Read and buffer the body for potential re-reading
 	bodyBytes, err := io.ReadAll(req.Body)
 	if err != nil {
 		slog.Error("streamable read body", slog.Any("err", err))
-		http.Error(w, "failed to read body", http.StatusBadRequest)
+		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 	defer req.Body.Close()
 
-	// Decode the JSON-RPC request from the body.
 	mcpreq, err := mcpsrv.Decode(bytes.NewReader(bodyBytes))
 	if err != nil {
 		slog.Error("streamable decode", slog.Any("err", err))
-		// Check if this is a notification/response only - return 202 Accepted
-		if isNotificationOnly(bodyBytes) {
+
+		// Per spec: responses/notifications-only can be 202 Accepted
+		if isNotificationOrResponseOnly(bodyBytes) {
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
+
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -181,52 +167,15 @@ func handleMCPPost(ctx context.Context, w http.ResponseWriter, req *http.Request
 		slog.Debug("streamable init", slog.String("session", session.id))
 		w.Header().Set("Mcp-Session-Id", session.id)
 
-		// Check if client wants SSE stream
-		if acceptSSE(req) {
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.Header().Set("Cache-Control", "no-cache")
-			w.Header().Set("Connection", "keep-alive")
-			w.Header().Set("Mcp-Session-Id", session.id)
-
-			f, ok := w.(http.Flusher)
-			if !ok {
-				http.Error(w, "streaming not supported", http.StatusInternalServerError)
-				return
-			}
-
-			// Send initialize response as SSE message event
-			err := sse.Encode(w, sse.Event{
-				Event: "message",
-				Data:  rpc.NewResponse(mcp.InitializeResponse{
-					ProtocolVersion: mcp.Version,
-					ServerInfo: mcp.Info{
-						Name:    mcpsrv.Name,
-						Version: mcpsrv.Version,
-					},
-					Capabilities: mcp.Capabilities{"tools": mcp.Capability{}},
-				}, r.Request.Id),
-			})
-			if err != nil {
-				slog.Error("sse encode", slog.Any("err", err))
-				return
-			}
-			f.Flush()
-			// Keep connection open for server-to-client messages
-			select {
-			case <-req.Context().Done():
-			case <-ctx.Done():
-			}
-		} else {
-			// Return JSON response
-			writeJSON(w, rpc.NewResponse(mcp.InitializeResponse{
-				ProtocolVersion: mcp.Version,
-				ServerInfo: mcp.Info{
-					Name:    mcpsrv.Name,
-					Version: mcpsrv.Version,
-				},
-				Capabilities: mcp.Capabilities{"tools": mcp.Capability{}},
-			}, r.Request.Id))
-		}
+		// Minimal safe behavior: always JSON for initialize response
+		writeJSON(w, rpc.NewResponse(mcp.InitializeResponse{
+			ProtocolVersion: mcp.Version,
+			ServerInfo: mcp.Info{
+				Name:    mcpsrv.Name,
+				Version: mcpsrv.Version,
+			},
+			Capabilities: mcp.Capabilities{"tools": mcp.Capability{}},
+		}, r.Request.Id))
 
 	case mcp.NotificationsInitializedRequest:
 		setSessionHeader(w, req)
@@ -267,15 +216,16 @@ func handleMCPPost(ctx context.Context, w http.ResponseWriter, req *http.Request
 		if !ok {
 			return
 		}
+
 		// Lock per session to serialize browser access.
 		session.mu.Lock()
 		defer session.mu.Unlock()
 
 		slog.Debug("streamable tool call", slog.String("name", r.Params.Name))
 
-		// CallTool blocks until the browser operation completes.
 		res, err := mcpsrv.CallTool(ctx, session.mcpconn, r)
 		w.Header().Set("Mcp-Session-Id", session.id)
+
 		if err != nil {
 			slog.Error("streamable tool error", slog.String("name", r.Params.Name), slog.Any("err", err))
 			writeJSON(w, rpc.NewResponse(mcp.ToolsCallResponse{
@@ -284,6 +234,7 @@ func handleMCPPost(ctx context.Context, w http.ResponseWriter, req *http.Request
 			}, r.Id))
 			return
 		}
+
 		writeJSON(w, rpc.NewResponse(mcp.ToolsCallResponse{
 			Content: []mcp.ToolsCallContent{{Type: "text", Text: res}},
 		}, r.Id))
@@ -314,7 +265,6 @@ func handleMCPGet(ctx context.Context, w http.ResponseWriter, req *http.Request,
 		f.Flush()
 	}
 
-	// Block until client disconnects or server shuts down.
 	select {
 	case <-req.Context().Done():
 	case <-ctx.Done():
@@ -362,3 +312,4 @@ func writeJSON(w http.ResponseWriter, data any) {
 		slog.Error("json encode", slog.Any("err", err))
 	}
 }
+
