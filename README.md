@@ -8,7 +8,7 @@ via [CDP protocol](https://chromedevtools.github.io/devtools-protocol/).
 
 ```mermaid
 flowchart LR;
-  A[CDP Client]-->|SSE or stdio|gomcp;
+  A[MCP Client]-->|Streamable HTTP / SSE / stdio|gomcp;
   gomcp-->|CDP|B[Lightpanda browser];
 ```
 
@@ -27,7 +27,7 @@ Once you have cloned the repository, build the binary with `go build`.
 
 ## Usage
 
-By default, `gocmp` starts a local instance of Lightpanda browser.
+By default, `gomcp` starts a local instance of Lightpanda browser.
 
 On the first run, you need to download the binary with the command:
 ```
@@ -91,6 +91,57 @@ By default, the server listens to the HTTP connection at `127.0.0.1:8081`.
 $ ./gomcp sse
 2025/05/06 14:37:13 INFO server listening addr=127.0.0.1:8081
 ```
+
+### Streamable HTTP (MCP 2025-03-26+)
+
+The `sse` command also enables the [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)
+transport on the `/mcp` endpoint. This is the recommended transport for remote MCP servers.
+
+The Streamable HTTP transport supports:
+- **POST** `/mcp` — Send JSON-RPC requests (`initialize`, `tools/list`, `tools/call`, `ping`, etc.)
+- **GET** `/mcp` — Open an SSE stream for server-initiated notifications
+- **DELETE** `/mcp` — Close a session
+
+Session management is handled via the `Mcp-Session-Id` header.
+
+```
+$ ./gomcp sse
+2025/05/06 14:37:13 INFO server listening addr=127.0.0.1:8081
+# Streamable HTTP endpoint: http://127.0.0.1:8081/mcp
+# Legacy SSE endpoint:      http://127.0.0.1:8081/sse
+```
+
+Example client configuration (for MCP clients supporting Streamable HTTP):
+```json
+{
+  "mcpServers": {
+    "lightpanda": {
+      "url": "http://127.0.0.1:8081/mcp"
+    }
+  }
+}
+```
+
+## MCP Protocol
+
+This server implements MCP protocol version `2025-03-26`, supporting:
+- `initialize` / `notifications/initialized` — Handshake and capability negotiation
+- `tools/list` and `tools/call` — Tool discovery and invocation
+- `ping` — Keepalive / connectivity check
+- `resources/list` and `prompts/list` — Empty responses (no resources/prompts)
+- `notifications/cancelled` — Request cancellation
+- Session management via `Mcp-Session-Id` header
+
+### Available Tools
+
+| Tool | Description | Required Params |
+|------|-------------|----------------|
+| `goto` | Navigate to a URL and load the page | `url` |
+| `search` | Search via DuckDuckGo | `text` |
+| `markdown` | Get page content as Markdown | — |
+| `links` | Extract all links from the page | — |
+| `over` | Signal task completion with result | — |
+
 ## Thanks
 
 `gomcp` is built thanks of open source projects, in particular:

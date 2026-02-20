@@ -21,6 +21,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -138,6 +139,12 @@ func isNotificationOrResponseOnly(body []byte) bool {
 
 // handleMCPPost processes incoming JSON-RPC requests over Streamable HTTP.
 func handleMCPPost(ctx context.Context, w http.ResponseWriter, req *http.Request, ss *StreamableSessions, mcpsrv *MCPServer) {
+	// Validate Content-Type per MCP spec: must be application/json.
+	if ct := req.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+
 	bodyBytes, err := io.ReadAll(req.Body)
 	if err != nil {
 		slog.Error("streamable read body", slog.Any("err", err))
@@ -184,6 +191,14 @@ func handleMCPPost(ctx context.Context, w http.ResponseWriter, req *http.Request
 	case mcp.NotificationsCancelledRequest:
 		setSessionHeader(w, req)
 		w.WriteHeader(http.StatusAccepted)
+
+	case mcp.PingRequest:
+		session, ok := requireSession(w, req, ss)
+		if !ok {
+			return
+		}
+		w.Header().Set("Mcp-Session-Id", session.id)
+		writeJSON(w, rpc.NewResponse(struct{}{}, r.Id))
 
 	case mcp.ResourcesListRequest:
 		session, ok := requireSession(w, req, ss)
@@ -312,4 +327,3 @@ func writeJSON(w http.ResponseWriter, data any) {
 		slog.Error("json encode", slog.Any("err", err))
 	}
 }
-

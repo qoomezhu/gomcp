@@ -156,17 +156,17 @@ func (s *MCPServer) ListTools() []mcp.Tool {
 		{
 			Name: "goto",
 			Description: "Navigate to a specified URL and load the page in" +
-				"memory so it can be reused later for info extraction.",
+				" memory so it can be reused later for info extraction.",
 			InputSchema: mcp.NewSchemaObject(mcp.Properties{
 				"url": mcp.NewSchemaString("The URL to navigate to, must be a valid URL."),
-			}),
+			}, "url"),
 		},
 		{
 			Name:        "search",
 			Description: "Use a search engine to look for specific words, terms, sentences. The search page will then be loaded in memory.",
 			InputSchema: mcp.NewSchemaObject(mcp.Properties{
 				"text": mcp.NewSchemaString("The text to search for, must be a valid search query."),
-			}),
+			}, "text"),
 		},
 		{
 			Name:        "markdown",
@@ -295,6 +295,10 @@ func (s *MCPServer) Handle(
 			},
 			Capabilities: mcp.Capabilities{"tools": mcp.Capability{}},
 		}, r.Request.Id))
+	case mcp.NotificationsInitializedRequest:
+		slog.Debug("client initialized")
+	case mcp.PingRequest:
+		senderr = send("message", rpc.NewResponse(struct{}{}, r.Id))
 	case mcp.PromptsListRequest:
 		senderr = send("message", rpc.NewResponse(struct{}{}, r.Id))
 	case mcp.ResourcesListRequest:
@@ -304,7 +308,7 @@ func (s *MCPServer) Handle(
 			Tools: s.ListTools(),
 		}, r.Id))
 	case mcp.ToolsCallRequest:
-		slog.Debug("call tool", slog.String("name", r.Params.Name), slog.Int("id", r.Id))
+		slog.Debug("call tool", slog.String("name", r.Params.Name), slog.Any("id", r.Id))
 		go func() {
 			res, err := s.CallTool(ctx, mcpconn, r)
 
@@ -317,6 +321,7 @@ func (s *MCPServer) Handle(
 						Text: err.Error(),
 					}},
 				}, r.Id))
+				return
 			}
 
 			senderr = send("message", rpc.NewResponse(mcp.ToolsCallResponse{
@@ -329,7 +334,7 @@ func (s *MCPServer) Handle(
 
 	case mcp.NotificationsCancelledRequest:
 		slog.Debug("cancelled",
-			slog.Int("id", r.Params.RequestId),
+			slog.Any("id", r.Params.RequestId),
 			slog.String("reason", r.Params.Reason),
 		)
 		// TODO cancel the corresponding request.

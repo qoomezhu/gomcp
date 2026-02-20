@@ -58,6 +58,8 @@ func Decode(r rpc.Request) (Request, error) {
 		}
 
 		return rr, nil
+	case PingMethod:
+		return PingRequest(r), nil
 	}
 
 	return nil, fmt.Errorf("invalid mcp: %s", r.Method)
@@ -97,7 +99,7 @@ const NotificationsCancelledMethod = "notifications/cancelled"
 type NotificationsCancelledRequest struct {
 	rpc.Request
 	Params struct {
-		RequestId int    `json:"requestId"`
+		RequestId any    `json:"requestId"`
 		Reason    string `json:"reason"`
 	}
 }
@@ -140,3 +142,7 @@ type ToolsCallResponse struct {
 	IsError bool               `json:"isError"`
 	Content []ToolsCallContent `json:"content"`
 }
+
+const PingMethod = "ping"
+
+type PingRequest rpc.Request
