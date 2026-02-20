@@ -32,13 +32,17 @@ type Properties map[string]Schema
 type schemaObject struct {
 	SchemaType
 	Properties           Properties `json:"properties"`
+	Required             []string   `json:"required,omitempty"`
 	AdditionalProperties bool       `json:"additionalProperties"`
 }
 
-func NewSchemaObject(p map[string]Schema) schemaObject {
+// NewSchemaObject creates a JSON Schema object with properties and optional required fields.
+// The required parameter is variadic for backward compatibility.
+func NewSchemaObject(p map[string]Schema, required ...string) schemaObject {
 	return schemaObject{
 		SchemaType: SchemaType{Type: "object"},
 		Properties: p,
+		Required:   required,
 	}
 }
 

@@ -29,7 +29,7 @@ type Error struct {
 
 type Request struct {
 	Version string          `json:"jsonrpc"`
-	Id      int             `json:"id,omitempty"`
+	Id      any             `json:"id,omitempty"`
 	Method  string          `json:"method,omitempty"`
 	Params  json.RawMessage `json:"params"`
 	Error   *Error          `json:"error,omitempty"`
@@ -49,6 +49,11 @@ func (req Request) Validate() error {
 	return nil
 }
 
+// IsNotification returns true if the request is a JSON-RPC notification (has method but no id).
+func (req Request) IsNotification() bool {
+	return req.Id == nil && req.Method != ""
+}
+
 func (req Request) Err() error {
 	if req.Error == nil {
 		return nil
@@ -59,14 +64,39 @@ func (req Request) Err() error {
 
 type Response struct {
 	Version string `json:"jsonrpc"`
-	Id      int    `json:"id"`
+	Id      any    `json:"id"`
 	Result  any    `json:"result"`
 }
 
-func NewResponse(data any, id int) Response {
+func NewResponse(data any, id any) Response {
 	return Response{
 		Result:  data,
 		Id:      id,
 		Version: Version,
+	}
+}
+
+// ErrorResponse represents a JSON-RPC error response.
+type ErrorResponse struct {
+	Version string `json:"jsonrpc"`
+	Id      any    `json:"id"`
+	Error   Error  `json:"error"`
+}
+
+// Standard JSON-RPC error codes.
+const (
+	ParseError     = -32700
+	InvalidRequest = -32600
+	MethodNotFound = -32601
+	InvalidParams  = -32602
+	InternalError  = -32603
+)
+
+// NewErrorResponse creates a JSON-RPC error response.
+func NewErrorResponse(id any, code int, message string) ErrorResponse {
+	return ErrorResponse{
+		Version: Version,
+		Id:      id,
+		Error:   Error{Code: code, Message: message},
 	}
 }
