@@ -46,7 +46,7 @@ func (id *SessionId) Set(v string) error {
 }
 
 type Sessions struct {
-	sync.Mutex
+	sync.RWMutex
 	s map[SessionId]*Session
 }
 
@@ -63,9 +63,9 @@ func (ss *Sessions) Add(s *Session) {
 }
 
 func (ss *Sessions) Get(id SessionId) (*Session, bool) {
-	ss.Lock()
+	ss.RLock()
 	s, ok := ss.s[id]
-	ss.Unlock()
+	ss.RUnlock()
 	return s, ok
 }
 
@@ -76,24 +76,41 @@ func (ss *Sessions) Remove(id SessionId) {
 }
 
 type Session struct {
-	sync.Mutex
 	id        SessionId
 	creq      chan mcp.Request
+	done      chan struct{}
+	closeOnce sync.Once
 	createdAt time.Time
 }
 
 func NewSession() *Session {
 	return &Session{
 		id:        SessionId(uuid.New()),
-		creq:      make(chan mcp.Request),
+		creq:      make(chan mcp.Request, 16),
+		done:      make(chan struct{}),
 		createdAt: time.Now(),
 	}
 }
 
 func (s *Session) Close() {
-	close(s.creq)
+	s.closeOnce.Do(func() {
+		close(s.done)
+	})
 }
 
-func (s *Session) Requests() chan mcp.Request {
+func (s *Session) Requests() <-chan mcp.Request {
 	return s.creq
+}
+
+func (s *Session) Done() <-chan struct{} {
+	return s.done
+}
+
+func (s *Session) Enqueue(req mcp.Request) bool {
+	select {
+	case <-s.done:
+		return false
+	case s.creq <- req:
+		return true
+	}
 }
