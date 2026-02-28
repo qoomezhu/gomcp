@@ -137,16 +137,14 @@ func handleSSE(_ context.Context, sessions *Sessions, srv *MCPServer) http.Handl
 
 		for {
 			select {
-			case rreq, ok := <-s.Requests():
-				if !ok {
-					// closed channel
-					return
-				}
+			case rreq := <-s.Requests():
 				if err := srv.Handle(ctx, rreq, mcpconn, send); err != nil {
 					// disconnect on error
 					slog.Error("handle req", slog.Any("err", err))
 					return
 				}
+			case <-s.Done():
+				return
 			case <-req.Context().Done():
 				return
 			case <-ctx.Done():
@@ -188,7 +186,10 @@ func handleMessage(_ context.Context, sessions *Sessions, srv *MCPServer) http.H
 			return
 		}
 
-		s.Requests() <- mcpreq
+		if ok := s.Enqueue(mcpreq); !ok {
+			http.Error(w, "session closed", http.StatusGone)
+			return
+		}
 
 		w.WriteHeader(http.StatusAccepted)
 	}

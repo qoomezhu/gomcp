@@ -90,7 +90,12 @@ func runstd(ctx context.Context, in io.Reader, out io.Writer, mcpsrv *MCPServer)
 		case <-ctx.Done():
 			close(cout)
 			return nil
-		case b := <-cin:
+		case b, ok := <-cin:
+			if !ok {
+				close(cout)
+				return nil
+			}
+
 			mcpreq, err := mcpsrv.Decode(bytes.NewReader(b))
 			if err != nil {
 				slog.Error("message decode error", slog.Any("err", err))

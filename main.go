@@ -110,7 +110,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		browser, err := newbrowser(ctx)
 		if err != nil {
 			if errors.Is(err, ErrNoBrowser) {
-				return errors.New("browser not found. Please run gocmp download first.")
+				return errors.New("browser not found. Please run gomcp download first.")
 			}
 			return fmt.Errorf("new browser: %w", err)
 		}

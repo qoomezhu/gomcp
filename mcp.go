@@ -309,28 +309,26 @@ func (s *MCPServer) Handle(
 		}, r.Id))
 	case mcp.ToolsCallRequest:
 		slog.Debug("call tool", slog.String("name", r.Params.Name), slog.Any("id", r.Id))
-		go func() {
-			res, err := s.CallTool(ctx, mcpconn, r)
 
-			if err != nil {
-				slog.Error("call tool", slog.String("name", r.Params.Name), slog.Any("err", err))
-				senderr = send("message", rpc.NewResponse(mcp.ToolsCallResponse{
-					IsError: true,
-					Content: []mcp.ToolsCallContent{{
-						Type: "text",
-						Text: err.Error(),
-					}},
-				}, r.Id))
-				return
-			}
-
+		res, err := s.CallTool(ctx, mcpconn, r)
+		if err != nil {
+			slog.Error("call tool", slog.String("name", r.Params.Name), slog.Any("err", err))
 			senderr = send("message", rpc.NewResponse(mcp.ToolsCallResponse{
+				IsError: true,
 				Content: []mcp.ToolsCallContent{{
 					Type: "text",
-					Text: res,
+					Text: err.Error(),
 				}},
 			}, r.Id))
-		}()
+			break
+		}
+
+		senderr = send("message", rpc.NewResponse(mcp.ToolsCallResponse{
+			Content: []mcp.ToolsCallContent{{
+				Type: "text",
+				Text: res,
+			}},
+		}, r.Id))
 
 	case mcp.NotificationsCancelledRequest:
 		slog.Debug("cancelled",
