@@ -124,7 +124,7 @@ func responseHeaders() map[string]string {
 	return map[string]string{
 		"Access-Control-Allow-Origin":  "*",
 		"Access-Control-Allow-Headers": "content-type,accept,authorization,mcp-session-id,mcp-protocol-version",
-		"Access-Control-Allow-Methods": "POST,OPTIONS",
+		"Access-Control-Allow-Methods": "POST,GET,DELETE,OPTIONS",
 		"Access-Control-Expose-Headers": "Mcp-Session-Id",
 	}
 }
@@ -347,11 +347,25 @@ func sessionFromHeader(req events.APIGatewayProxyRequest, secret string) (Sessio
 	return decodeSession(headerLookup(req.Headers, "Mcp-Session-Id"), secret)
 }
 
-func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	if req.HTTPMethod == http.MethodOptions {
-		return emptyResponse(http.StatusNoContent), nil
+func handleNoopGet(req events.APIGatewayProxyRequest) events.APIGatewayProxyResponse {
+	headers := responseHeaders()
+	if id := headerLookup(req.Headers, "Mcp-Session-Id"); id != "" {
+		headers["Mcp-Session-Id"] = id
 	}
-	if req.HTTPMethod != http.MethodPost {
+	return events.APIGatewayProxyResponse{StatusCode: http.StatusNoContent, Headers: headers}
+}
+
+func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	switch req.HTTPMethod {
+	case http.MethodOptions:
+		return emptyResponse(http.StatusNoContent), nil
+	case http.MethodGet:
+		return handleNoopGet(req), nil
+	case http.MethodDelete:
+		return emptyResponse(http.StatusNoContent), nil
+	case http.MethodPost:
+		// continue below
+	default:
 		return events.APIGatewayProxyResponse{
 			StatusCode: http.StatusMethodNotAllowed,
 			Headers:    responseHeaders(),
