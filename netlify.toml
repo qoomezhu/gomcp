@@ -1,0 +1,11 @@
+[build]
+  functions = "netlify/functions"
+
+[build.environment]
+  GO_VERSION = "1.24.2"
+
+[[redirects]]
+  from = "/mcp"
+  to = "/.netlify/functions/mcp"
+  status = 200
+  force = true

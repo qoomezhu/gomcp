@@ -3,6 +3,7 @@ module github.com/lightpanda-io/gomcp
 go 1.24.2
 
 require (
+	github.com/aws/aws-lambda-go v1.53.0
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/chromedp/cdproto v0.0.0-20250403032234-65de8f5d025b
 	github.com/chromedp/chromedp v0.13.6
