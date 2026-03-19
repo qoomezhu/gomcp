@@ -1,5 +1,15 @@
 # Lightpanda Go MCP server
 
+---
+
+:warning: This project was a first experiment to expose an MCP for
+[Lightpanda Browser](https://lightpanda.io/).
+But now, the browser embed an MCP server natively.
+More details in the [native MCP blog
+post](https://lightpanda.io/blog/posts/lp-domain-commands-and-native-mcp#native-mcp-server).
+
+---
+
 `gomcp` is an [MCP server](https://modelcontextprotocol.io) written in
 [Go](https://go.dev/).
 
