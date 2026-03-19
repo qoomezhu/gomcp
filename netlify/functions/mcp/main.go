@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -16,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JohannesKaufmann/html-to-markdown"
+	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/chromedp/cdproto/cdp"
@@ -242,7 +241,7 @@ func linksFromURL(ctx context.Context, cdpURL, target string) (string, error) {
 func tools() []mcp.Tool {
 	return []mcp.Tool{
 		{
-			Name: "goto",
+			Name:        "goto",
 			Description: "Navigate a remote CDP browser to a specified URL and store the URL in the Netlify session token so the page can be reopened later.",
 			InputSchema: mcp.NewSchemaObject(mcp.Properties{
 				"url": mcp.NewSchemaString("The URL to navigate to, must be a valid URL."),
