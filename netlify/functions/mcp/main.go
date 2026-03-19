@@ -26,6 +26,9 @@ import (
 
 const functionName = "gomcp netlify lite"
 
+// MCPProtocolVersion is the negotiated protocol version advertised back to clients.
+const MCPProtocolVersion = mcp.Version
+
 type SessionState struct {
 	CurrentURL string `json:"current_url,omitempty"`
 	IssuedAt   int64  `json:"issued_at"`
@@ -125,7 +128,8 @@ func responseHeaders() map[string]string {
 		"Access-Control-Allow-Origin":  "*",
 		"Access-Control-Allow-Headers": "content-type,accept,authorization,mcp-session-id,mcp-protocol-version",
 		"Access-Control-Allow-Methods": "POST,GET,DELETE,OPTIONS",
-		"Access-Control-Expose-Headers": "Mcp-Session-Id",
+		"Access-Control-Expose-Headers": "Mcp-Session-Id,MCP-Protocol-Version",
+		"MCP-Protocol-Version":         MCPProtocolVersion,
 	}
 }
 
